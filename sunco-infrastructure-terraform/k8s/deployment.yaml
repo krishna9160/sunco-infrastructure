@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sunco-app
+  labels:
+    app: sunco
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: sunco
+
+  template:
+    metadata:
+      labels:
+        app: sunco
+
+    spec:
+      serviceAccountName: sunco-app
+
+      containers:
+        - name: sunco-app
+          image: 190444051331.dkr.ecr.ap-southeast-1.amazonaws.com/sunco:1.0

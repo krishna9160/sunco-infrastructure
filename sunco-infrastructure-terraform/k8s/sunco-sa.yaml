@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sunco-app
+  namespace: default
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::190444051331:role/sunco-pod-s3-role
