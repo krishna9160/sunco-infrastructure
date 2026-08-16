@@ -9,16 +9,10 @@ pipeline {
             }
         }
 
-        stage('Verify Workspace') {
+        stage('Gitleaks Scan') {
             steps {
-                sh '''
-                    echo "Jenkins workspace:"
-                    pwd
-
-                    echo "Repository files:"
-                    ls -la
-                '''
-            }
+                sh 'gitleaks detect --source . --verbose'
+            }   
         }
     }
 }
