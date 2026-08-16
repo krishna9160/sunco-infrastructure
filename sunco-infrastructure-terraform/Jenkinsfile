@@ -37,15 +37,15 @@ pipeline {
             }
         }
 
-        stage('Checkov Scan') {
-            steps {
-                sh '''
-                    checkov -d "$TF_DIR"
-                         --soft-fail               
-                '''
-            }
-        }
-
+stage('Checkov Scan') {
+    steps {
+        sh '''
+            checkov -d "$TF_DIR" \
+              --framework terraform \
+              --soft-fail
+        '''
+    }
+}
         stage('Install Dependencies') {
             steps {
                 dir("${APP_DIR}") {
