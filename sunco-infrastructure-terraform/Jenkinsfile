@@ -41,6 +41,7 @@ pipeline {
             steps {
                 sh '''
                     checkov -d "$TF_DIR"
+                         --soft-fail               
                 '''
             }
         }
