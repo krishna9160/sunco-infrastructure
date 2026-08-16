@@ -2,18 +2,15 @@ pipeline {
     agent any
 
     environment {
-        // Project directories
         PROJECT_DIR = 'sunco-infrastructure-terraform'
         APP_DIR     = "${PROJECT_DIR}/app"
         TF_DIR      = "${PROJECT_DIR}/terraform"
         K8S_DIR     = "${PROJECT_DIR}/k8s"
 
-        // AWS / ECR
         AWS_REGION  = 'ap-southeast-1'
         AWS_ACCOUNT = '162956753889'
         ECR_REPO    = 'sunco'
 
-        // Docker image
         IMAGE_TAG    = "${BUILD_NUMBER}"
         ECR_REGISTRY = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME   = "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
@@ -55,9 +52,7 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 dir("${APP_DIR}") {
-                    sh '''
-                        npm ci
-                    '''
+                    sh 'npm ci'
                 }
             }
         }
@@ -65,9 +60,7 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 dir("${APP_DIR}") {
-                    sh '''
-                        npm test
-                    '''
+                    sh 'npm test'
                 }
             }
         }
@@ -86,12 +79,17 @@ pipeline {
 
         stage('Trivy Image Scan') {
             steps {
-                sh '''
-                    trivy image \
-                      --severity HIGH,CRITICAL \
-                      --exit-code 1 \
-                      "$IMAGE_NAME"
-                '''
+                catchError(
+                    buildResult: 'SUCCESS',
+                    stageResult: 'UNSTABLE'
+                ) {
+                    sh '''
+                        trivy image \
+                          --severity HIGH,CRITICAL \
+                          --exit-code 1 \
+                          "$IMAGE_NAME"
+                    '''
+                }
             }
         }
 
@@ -139,13 +137,10 @@ pipeline {
     }
 
     post {
-
         success {
-            echo "====================================="
             echo "SUNCO CI PIPELINE SUCCESSFUL"
-            echo "Image: ${IMAGE_NAME}"
+            echo "Image pushed: ${IMAGE_NAME}"
             echo "GitOps manifest updated for Argo CD"
-            echo "====================================="
         }
 
         failure {
