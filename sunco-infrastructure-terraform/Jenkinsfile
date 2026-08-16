@@ -1,6 +1,15 @@
 pipeline {
     agent any
 
+    environment {
+        AWS_REGION   = 'ap-southeast-1'
+        AWS_ACCOUNT  = '162956753889'
+        ECR_REPO     = 'sunco'
+        IMAGE_TAG    = "${BUILD_NUMBER}"
+        ECR_REGISTRY = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_NAME   = "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
+    }
+
     stages {
 
         stage('Checkout') {
@@ -9,10 +18,87 @@ pipeline {
             }
         }
 
-        stage('Gitleaks Scan') {
+        stage('Gitleaks') {
             steps {
-                sh 'gitleaks detect --source . --verbose'
-            }   
+                sh '''
+                    gitleaks detect \
+                      --source . \
+                      --verbose
+                '''
+            }
+        }
+
+        stage('Checkov') {
+            steps {
+                sh '''
+                    checkov -d sunco-infrastructure/
+                '''
+            }
+        }
+
+        stage('Install Dependencies') {
+            steps {
+                sh '''
+                    npm ci
+                '''
+            }
+        }
+
+        stage('Unit Tests') {
+            steps {
+                sh '''
+                    npm test
+                '''
+            }
+        }
+
+        stage('Docker Build') {
+            steps {
+                sh '''
+                    docker build -t $IMAGE_NAME .
+                '''
+            }
+        }
+
+        stage('Trivy Scan') {
+            steps {
+                sh '''
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 1 \
+                      $IMAGE_NAME
+                '''
+            }
+        }
+
+        stage('ECR Login') {
+            steps {
+                sh '''
+                    aws ecr get-login-password \
+                      --region $AWS_REGION | \
+                    docker login \
+                      --username AWS \
+                      --password-stdin $ECR_REGISTRY
+                '''
+            }
+        }
+
+        stage('Push Image') {
+            steps {
+                sh '''
+                    docker push $IMAGE_NAME
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "CI successful: ${IMAGE_NAME}"
+        }
+
+        failure {
+            echo "CI failed"
         }
     }
 }
