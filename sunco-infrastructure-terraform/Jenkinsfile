@@ -2,9 +2,18 @@ pipeline {
     agent any
 
     environment {
+        // Repository structure
+        PROJECT_DIR = 'sunco-infrastructure-terraform'
+        APP_DIR     = "${PROJECT_DIR}/app"
+        TF_DIR      = "${PROJECT_DIR}/terraform"
+        K8S_DIR     = "${PROJECT_DIR}/k8s"
+
+        // AWS / ECR
         AWS_REGION   = 'ap-southeast-1'
         AWS_ACCOUNT  = '162956753889'
         ECR_REPO     = 'sunco'
+
+        // Image details
         IMAGE_TAG    = "${BUILD_NUMBER}"
         ECR_REGISTRY = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME   = "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
@@ -18,55 +27,63 @@ pipeline {
             }
         }
 
-        stage('Gitleaks') {
+        stage('Gitleaks Scan') {
             steps {
                 sh '''
                     gitleaks detect \
-                      --source . \
+                      --source "$PROJECT_DIR" \
                       --verbose
                 '''
             }
         }
 
-        stage('Checkov') {
+        stage('Checkov Scan') {
             steps {
                 sh '''
-                    checkov -d sunco-infrastructure/
+                    checkov -d "$TF_DIR"
                 '''
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                sh '''
-                    npm ci
-                '''
+                dir("${APP_DIR}") {
+                    sh '''
+                        npm ci
+                    '''
+                }
             }
         }
 
         stage('Unit Tests') {
             steps {
-                sh '''
-                    npm test
-                '''
+                dir("${APP_DIR}") {
+                    sh '''
+                        npm test
+                    '''
+                }
             }
         }
 
         stage('Docker Build') {
             steps {
-                sh '''
-                    docker build -t $IMAGE_NAME .
-                '''
+                dir("${APP_DIR}") {
+                    sh '''
+                        docker build \
+                          -t "$IMAGE_NAME" \
+                          .
+                    '''
+                }
             }
         }
 
-        stage('Trivy Scan') {
+        stage('Trivy Image Scan') {
             steps {
                 sh '''
                     trivy image \
                       --severity HIGH,CRITICAL \
                       --exit-code 1 \
-                      $IMAGE_NAME
+                      "$IMAGE_NAME"
                 '''
             }
         }
@@ -75,30 +92,39 @@ pipeline {
             steps {
                 sh '''
                     aws ecr get-login-password \
-                      --region $AWS_REGION | \
-                    docker login \
+                      --region "$AWS_REGION" \
+                    | docker login \
                       --username AWS \
-                      --password-stdin $ECR_REGISTRY
+                      --password-stdin "$ECR_REGISTRY"
                 '''
             }
         }
 
-        stage('Push Image') {
+        stage('Push Image to ECR') {
             steps {
                 sh '''
-                    docker push $IMAGE_NAME
+                    docker push "$IMAGE_NAME"
                 '''
             }
         }
     }
 
     post {
+
         success {
-            echo "CI successful: ${IMAGE_NAME}"
+            echo "CI SUCCESS"
+            echo "Docker image pushed to ECR:"
+            echo "${IMAGE_NAME}"
         }
 
         failure {
-            echo "CI failed"
+            echo "CI FAILED"
+        }
+
+        always {
+            sh '''
+                docker logout "$ECR_REGISTRY" || true
+            '''
         }
     }
 }
