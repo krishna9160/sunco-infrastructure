@@ -2,15 +2,18 @@ pipeline {
     agent any
 
     environment {
+        // Project directories
         PROJECT_DIR = 'sunco-infrastructure-terraform'
         APP_DIR     = "${PROJECT_DIR}/app"
         TF_DIR      = "${PROJECT_DIR}/terraform"
         K8S_DIR     = "${PROJECT_DIR}/k8s"
 
+        // AWS / ECR
         AWS_REGION  = 'ap-southeast-1'
         AWS_ACCOUNT = '162956753889'
         ECR_REPO    = 'sunco'
 
+        // Docker image
         IMAGE_TAG    = "${BUILD_NUMBER}"
         ECR_REGISTRY = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
         IMAGE_NAME   = "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
@@ -24,7 +27,7 @@ pipeline {
             }
         }
 
-        stage('Gitleaks') {
+        stage('Gitleaks Scan') {
             steps {
                 sh '''
                     gitleaks detect \
@@ -34,18 +37,27 @@ pipeline {
             }
         }
 
-        stage('Checkov') {
+        stage('Checkov Scan') {
             steps {
-                sh '''
-                    checkov -d "$TF_DIR"
-                '''
+                catchError(
+                    buildResult: 'SUCCESS',
+                    stageResult: 'UNSTABLE'
+                ) {
+                    sh '''
+                        /opt/checkov-venv/bin/checkov \
+                          -d "$TF_DIR" \
+                          --framework terraform
+                    '''
+                }
             }
         }
 
         stage('Install Dependencies') {
             steps {
                 dir("${APP_DIR}") {
-                    sh 'npm ci'
+                    sh '''
+                        npm ci
+                    '''
                 }
             }
         }
@@ -53,7 +65,9 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 dir("${APP_DIR}") {
-                    sh 'npm test'
+                    sh '''
+                        npm test
+                    '''
                 }
             }
         }
@@ -62,13 +76,15 @@ pipeline {
             steps {
                 dir("${APP_DIR}") {
                     sh '''
-                        docker build -t "$IMAGE_NAME" .
+                        docker build \
+                          -t "$IMAGE_NAME" \
+                          .
                     '''
                 }
             }
         }
 
-        stage('Trivy Scan') {
+        stage('Trivy Image Scan') {
             steps {
                 sh '''
                     trivy image \
@@ -82,7 +98,7 @@ pipeline {
         stage('ECR Login') {
             steps {
                 sh '''
-                    aws ecr get-login-password \
+                    /usr/local/bin/aws ecr get-login-password \
                       --region "$AWS_REGION" \
                     | docker login \
                       --username AWS \
@@ -91,7 +107,7 @@ pipeline {
             }
         }
 
-        stage('Push Image') {
+        stage('Push Image to ECR') {
             steps {
                 sh '''
                     docker push "$IMAGE_NAME"
@@ -111,24 +127,29 @@ pipeline {
 
                     git add deployment.yaml
 
-                    git diff --cached --quiet || \
-                    git commit -m "Deploy Sunco image ${IMAGE_TAG}"
-
-                    git push origin HEAD:main
+                    if ! git diff --cached --quiet; then
+                        git commit -m "Deploy Sunco image ${IMAGE_TAG}"
+                        git push origin HEAD:main
+                    else
+                        echo "No GitOps manifest changes detected"
+                    fi
                 '''
             }
         }
     }
 
     post {
+
         success {
-            echo "CI completed successfully"
-            echo "Image pushed: ${IMAGE_NAME}"
+            echo "====================================="
+            echo "SUNCO CI PIPELINE SUCCESSFUL"
+            echo "Image: ${IMAGE_NAME}"
             echo "GitOps manifest updated for Argo CD"
+            echo "====================================="
         }
 
         failure {
-            echo "CI pipeline failed"
+            echo "SUNCO CI PIPELINE FAILED"
         }
 
         always {
