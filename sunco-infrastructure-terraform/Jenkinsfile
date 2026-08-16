@@ -7,9 +7,9 @@ pipeline {
         TF_DIR      = "${PROJECT_DIR}/terraform"
         K8S_DIR     = "${PROJECT_DIR}/k8s"
 
-        AWS_REGION   = 'ap-southeast-1'
-        AWS_ACCOUNT  = '162956753889'
-        ECR_REPO     = 'sunco'
+        AWS_REGION  = 'ap-southeast-1'
+        AWS_ACCOUNT = '162956753889'
+        ECR_REPO    = 'sunco'
 
         IMAGE_TAG    = "${BUILD_NUMBER}"
         ECR_REGISTRY = "${AWS_ACCOUNT}.dkr.ecr.${AWS_REGION}.amazonaws.com"
@@ -24,7 +24,7 @@ pipeline {
             }
         }
 
-        stage('Gitleaks Scan') {
+        stage('Gitleaks') {
             steps {
                 sh '''
                     gitleaks detect \
@@ -34,17 +34,10 @@ pipeline {
             }
         }
 
-        stage('Checkov Scan') {
+        stage('Checkov') {
             steps {
                 sh '''
-                    echo "Running Checkov scan in report-only mode..."
-
-                    checkov -d "$TF_DIR" \
-                      --framework terraform \
-                      --quiet \
-                      || true
-
-                    echo "Checkov scan completed. Findings are non-blocking for this lab."
+                    checkov -d "$TF_DIR"
                 '''
             }
         }
@@ -52,9 +45,7 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 dir("${APP_DIR}") {
-                    sh '''
-                        npm ci
-                    '''
+                    sh 'npm ci'
                 }
             }
         }
@@ -62,9 +53,7 @@ pipeline {
         stage('Unit Tests') {
             steps {
                 dir("${APP_DIR}") {
-                    sh '''
-                        npm test
-                    '''
+                    sh 'npm test'
                 }
             }
         }
@@ -73,20 +62,18 @@ pipeline {
             steps {
                 dir("${APP_DIR}") {
                     sh '''
-                        docker build \
-                          -t "$IMAGE_NAME" \
-                          .
+                        docker build -t "$IMAGE_NAME" .
                     '''
                 }
             }
         }
 
-        stage('Trivy Image Scan') {
+        stage('Trivy Scan') {
             steps {
                 sh '''
                     trivy image \
                       --severity HIGH,CRITICAL \
-                      --exit-code 0 \
+                      --exit-code 1 \
                       "$IMAGE_NAME"
                 '''
             }
@@ -104,10 +91,30 @@ pipeline {
             }
         }
 
-        stage('Push Image to ECR') {
+        stage('Push Image') {
             steps {
                 sh '''
                     docker push "$IMAGE_NAME"
+                '''
+            }
+        }
+
+        stage('Update GitOps Image Tag') {
+            steps {
+                sh '''
+                    cd "$K8S_DIR"
+
+                    sed -i "s|image: .*sunco:.*|image: $IMAGE_NAME|" deployment.yaml
+
+                    git config user.name "jenkins"
+                    git config user.email "jenkins@sunco.local"
+
+                    git add deployment.yaml
+
+                    git diff --cached --quiet || \
+                    git commit -m "Deploy Sunco image ${IMAGE_TAG}"
+
+                    git push origin HEAD:main
                 '''
             }
         }
@@ -115,13 +122,13 @@ pipeline {
 
     post {
         success {
-            echo "CI SUCCESS"
-            echo "Image pushed to ECR:"
-            echo "${IMAGE_NAME}"
+            echo "CI completed successfully"
+            echo "Image pushed: ${IMAGE_NAME}"
+            echo "GitOps manifest updated for Argo CD"
         }
 
         failure {
-            echo "CI FAILED"
+            echo "CI pipeline failed"
         }
 
         always {
